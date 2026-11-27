@@ -71,13 +71,13 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
-      - uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/init@v4
         with:
           languages: csharp
           build-mode: manual
           queries: security-extended,security-and-quality
       - run: dotnet build ApiGatewayPay.sln -c Release
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@v4
 
   secrets:
     name: Detección de secretos (gitleaks)
@@ -110,7 +110,7 @@ jobs:
           exit-code: "1"
           format: sarif
           output: trivy.sarif
-      - uses: github/codeql-action/upload-sarif@v3
+      - uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: trivy.sarif
