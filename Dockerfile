@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # ---------- build ----------
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:11.0 AS build
 WORKDIR /src
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
 COPY global.json nuget.config Directory.Build.props Directory.Packages.props ./
