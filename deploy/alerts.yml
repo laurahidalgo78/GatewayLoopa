@@ -1,0 +1,85 @@
+# Reglas de alerta (Prometheus). Enrutar severity=critical a guardia 24/7 (PagerDuty/Opsgenie) vía Alertmanager.
+groups:
+  - name: apigatewaypay-banking
+    rules:
+      - alert: BankKillSwitchActive
+        expr: max(agp_bank_kill_switch_active) > 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "Conexión bancaria suspendida por kill switch"
+          runbook: "docs/respuesta-incidentes.md#kill-switch"
+
+      - alert: ReconciliationDiscrepancies
+        expr: increase(agp_alerts_total{code="reconciliation_discrepancies"}[1h]) > 0
+        labels: { severity: critical }
+        annotations:
+          summary: "La conciliación encontró discrepancias graves"
+          runbook: "docs/respuesta-incidentes.md#discrepancias-de-conciliacion"
+
+      - alert: PaymentsStuckOrManualReview
+        expr: increase(agp_alerts_total{code=~"payment_stuck|payment_requires_manual_review|bank_amount_mismatch"}[30m]) > 0
+        labels: { severity: high }
+        annotations:
+          summary: "Pagos sin estado final o que requieren revisión manual"
+
+      - alert: DeadLetterJobs
+        expr: increase(agp_jobs_processed_total{outcome="Dead"}[15m]) > 0
+        labels: { severity: high }
+        annotations:
+          summary: "Trabajos en dead-letter (revisar tabla jobs con Status=Dead)"
+
+      - alert: BankCircuitOpen
+        expr: increase(agp_outbound_circuit_opened_total{integration=~"bank.*"}[5m]) > 0
+        labels: { severity: high }
+        annotations:
+          summary: "Circuit breaker abierto hacia el banco"
+
+      - alert: BankLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(agp_outbound_duration_milliseconds_bucket{integration="bank"}[5m]))) > 5000
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "p95 de latencia al banco > 5 s"
+
+      - alert: CertificateExpiringSoon
+        expr: min by (certificate) (agp_certificates_days_to_expiry) < 30
+        labels: { severity: warning }
+        annotations:
+          summary: "Certificado {{ $labels.certificate }} vence en menos de 30 días"
+
+      - alert: CertificateExpiryCritical
+        expr: min by (certificate) (agp_certificates_days_to_expiry) < 7
+        labels: { severity: critical }
+        annotations:
+          summary: "Certificado {{ $labels.certificate }} vence en menos de 7 días"
+
+  - name: apigatewaypay-security
+    rules:
+      - alert: WebhookSignatureFailures
+        expr: increase(agp_webhooks_rejected_total[10m]) > 20
+        labels: { severity: high }
+        annotations:
+          summary: "Muchos webhooks rechazados (posible ataque o rotación de secreto descoordinada)"
+
+      - alert: AuthenticationFailuresSpike
+        expr: sum(rate(agp_auth_failures_total[5m])) > 2
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Pico de fallos de autenticación/autorización (fuerza bruta o credenciales filtradas)"
+
+      - alert: RefreshTokenReuse
+        expr: increase(agp_alerts_total{code="refresh_token_reuse"}[15m]) > 0
+        labels: { severity: high }
+        annotations:
+          summary: "Reutilización de refresh token detectada (posible robo de sesión)"
+
+      - alert: HighServerErrorRate
+        expr: |
+          sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[5m]))
+            / sum(rate(http_server_request_duration_seconds_count[5m])) > 0.05
+        for: 5m
+        labels: { severity: high }
+        annotations:
+          summary: "Más del 5% de respuestas 5xx"

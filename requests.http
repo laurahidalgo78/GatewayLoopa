@@ -1,0 +1,40 @@
+### ApiGatewayPay - peticiones de ejemplo (Visual Studio / VS Code REST Client)
+### 1) Arranque: dotnet run --project src/ApiGatewayPay.Api
+### 2) Código TOTP: pwsh ./tools/Get-Totp.ps1 -User maker@tenant-a
+### 3) Pegue el access_token en @token. Contraseña de todos los usuarios de desarrollo: DevOnly-Sandbox-2026!
+
+@base = http://localhost:8080
+@token = PEGUE_AQUI_EL_ACCESS_TOKEN
+@otp = 000000
+
+### Login con MFA (password + TOTP)
+POST {{base}}/v1/auth/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=password&username=maker%40tenant-a&password=DevOnly-Sandbox-2026!&otp={{otp}}
+
+### Registrar beneficiario (requiere MFA reciente)
+POST {{base}}/v1/beneficiaries
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "displayName": "Proveedor SAS", "bankCode": "1007", "accountType": "savings", "accountNumber": "1234567890" }
+
+### Crear pago (Idempotency-Key obligatoria)
+POST {{base}}/v1/payments
+Authorization: Bearer {{token}}
+Content-Type: application/json
+Idempotency-Key: demo-pago-0000000001
+
+{ "beneficiaryId": "00000000-0000-0000-0000-000000000000", "amountMinor": 15000000, "currency": "COP", "reference": "Factura 1001" }
+
+### Listar pagos
+GET {{base}}/v1/payments?limit=10
+Authorization: Bearer {{token}}
+
+### Saldo (alias opaco de la cuenta)
+GET {{base}}/v1/accounts/ops-cop/balance
+Authorization: Bearer {{token}}
+
+### Salud
+GET {{base}}/ready

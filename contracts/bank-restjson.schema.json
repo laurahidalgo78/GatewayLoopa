@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apigatewaypay/contracts/bank-restjson.schema.json",
+  "title": "Contrato canónico REST/JSON del RestJsonBankCodec",
+  "description": "Formato que espera el codec RestJson. Si el banco usa otro formato, adapte RestJsonBankCodec (o use Iso20022/Soap). Las respuestas se validan estrictamente: campos requeridos, tipos, monedas ISO 4217 y montos no negativos en unidades mínimas.",
+  "$defs": {
+    "amount": {
+      "type": "object",
+      "required": [ "value", "currency" ],
+      "properties": {
+        "value": { "type": "integer", "minimum": 1, "description": "Unidades mínimas (centavos)" },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
+      }
+    },
+    "status": { "enum": [ "ACCEPTED", "PENDING", "SETTLED", "COMPLETED", "REJECTED", "RETURNED" ] },
+    "paymentRequest": {
+      "description": "POST {Endpoints.Payments}. Cabeceras: Idempotency-Key = endToEndId, firma según Bank:Real:Signing.",
+      "type": "object",
+      "required": [ "endToEndId", "amount", "debtorAccount", "creditor", "remittanceInformation" ],
+      "properties": {
+        "endToEndId": { "type": "string", "maxLength": 35 },
+        "amount": { "$ref": "#/$defs/amount" },
+        "debtorAccount": { "type": "string" },
+        "creditor": {
+          "type": "object",
+          "required": [ "name", "bankCode", "accountNumber", "accountType" ],
+          "properties": {
+            "name": { "type": "string", "maxLength": 140 },
+            "bankCode": { "type": "string" },
+            "accountNumber": { "type": "string" },
+            "accountType": { "enum": [ "Savings", "Checking", "Electronic" ] }
+          }
+        },
+        "remittanceInformation": { "type": "string", "maxLength": 140 }
+      }
+    },
+    "paymentResponse": {
+      "type": "object",
+      "required": [ "status" ],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "bankReference": { "type": "string" },
+        "reasonCode": { "type": "string", "description": "Preferible código ISO 20022 (AC01, AC04, AM04...)" }
+      }
+    },
+    "paymentStatus": {
+      "description": "GET {Endpoints.PaymentStatus}. 404 = el banco no tiene registro (habilita reenvío seguro).",
+      "type": "object",
+      "required": [ "endToEndId", "status" ],
+      "properties": {
+        "endToEndId": { "type": "string" },
+        "status": { "$ref": "#/$defs/status" },
+        "bankReference": { "type": "string" },
+        "reasonCode": { "type": "string" },
+        "amount": { "$ref": "#/$defs/amount" }
+      }
+    },
+    "balance": {
+      "type": "object",
+      "required": [ "currency", "available", "ledger", "asOf" ],
+      "properties": {
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+        "available": { "type": "integer" },
+        "ledger": { "type": "integer" },
+        "asOf": { "type": "string", "format": "date-time" }
+      }
+    },
+    "movements": {
+      "type": "object",
+      "required": [ "items" ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 10000,
+          "items": {
+            "type": "object",
+            "required": [ "id", "bookedAt", "amount", "currency", "direction" ],
+            "properties": {
+              "id": { "type": "string" },
+              "bookedAt": { "type": "string", "format": "date-time" },
+              "amount": { "type": "integer", "minimum": 0 },
+              "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+              "direction": { "enum": [ "CREDIT", "DEBIT" ] },
+              "endToEndId": { "type": "string" },
+              "description": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "statement": {
+      "description": "GET {Endpoints.Statement}: débitos del día para conciliación.",
+      "type": "object",
+      "required": [ "entries" ],
+      "properties": {
+        "entries": {
+          "type": "array",
+          "maxItems": 10000,
+          "items": {
+            "type": "object",
+            "required": [ "bankReference", "debtorAccount", "amount", "currency", "status" ],
+            "properties": {
+              "endToEndId": { "type": "string" },
+              "bankReference": { "type": "string" },
+              "debtorAccount": { "type": "string" },
+              "amount": { "type": "integer", "minimum": 0 },
+              "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+              "status": { "$ref": "#/$defs/status" }
+            }
+          }
+        }
+      }
+    },
+    "webhook": {
+      "description": "POST /v1/webhooks/bank/{Bank:Name}. Cabeceras: X-Bank-Timestamp (unix s), X-Bank-Nonce (16-128 alfanum), X-Bank-Signature (v1=hex HMAC-SHA256 de \"{ts}.{nonce}.{cuerpo}\" o firma RSA/ECDSA base64).",
+      "type": "object",
+      "required": [ "eventId", "type" ],
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128 },
+        "type": { "type": "string" },
+        "endToEndId": { "type": "string" },
+        "status": { "$ref": "#/$defs/status" },
+        "bankReference": { "type": "string" },
+        "reasonCode": { "type": "string" }
+      }
+    }
+  }
+}

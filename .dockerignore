@@ -1,0 +1,17 @@
+**/bin/
+**/obj/
+**/.vs/
+**/*.user
+**/*.db
+**/*.db-*
+**/TestResults/
+.git/
+.github/
+.env
+.env.*
+!.env.example
+secrets/
+tests/
+docs/
+tools/
+**/appsettings.Development.json

@@ -1,0 +1,12 @@
+# Reglas por defecto de gitleaks + excepción explícita y acotada para la configuración de desarrollo.
+# appsettings.Development.json contiene SOLO secretos aleatorios de sandbox para el banco/backend simulados;
+# EnvironmentGuard impide arrancar en producción si la sección DevSecrets tiene contenido.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Secretos de sandbox para mocks locales"
+paths = [
+  '''src/ApiGatewayPay\.Api/appsettings\.Development\.json''',
+  '''\.env\.example''',
+]

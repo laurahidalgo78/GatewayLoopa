@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <UserSecretsId>apigatewaypay-dev</UserSecretsId>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ApiGatewayPay.Core\ApiGatewayPay.Core.csproj" />
+    <ProjectReference Include="..\ApiGatewayPay.Infrastructure\ApiGatewayPay.Infrastructure.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- La configuración de desarrollo (secretos de sandbox) nunca se publica en la imagen. -->
+    <Content Update="appsettings.Development.json" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="ApiGatewayPay.Tests.Integration" />
+    <InternalsVisibleTo Include="ApiGatewayPay.Tests.Unit" />
+  </ItemGroup>
+</Project>

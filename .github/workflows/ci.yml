@@ -1,0 +1,164 @@
+# CI/CD con controles de seguridad: SCA, SAST, detección de secretos, escaneo de imagen y SBOM.
+# Recomendación: fije cada action por SHA de commit (no por tag) y active "branch protection" exigiendo estos jobs.
+name: ci
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1"   # re-escaneo semanal: aparecen CVE nuevas sin cambios de código
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  CI: "true"   # activa TreatWarningsAsErrors y RestoreLockedMode (Directory.Build.props)
+
+jobs:
+  build-test:
+    name: Build, tests y SCA (NuGet audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: "Restore (lock files + NuGet audit, falla con vulnerabilidades conocidas)"
+        run: dotnet restore ApiGatewayPay.sln --locked-mode
+      - name: Build (warnings como errores)
+        run: dotnet build ApiGatewayPay.sln -c Release --no-restore
+      - name: Tests unitarios, de integración y de seguridad
+        run: dotnet test ApiGatewayPay.sln -c Release --no-build --collect:"XPlat Code Coverage" --logger trx --results-directory TestResults
+      - name: Dependencias vulnerables (incluye transitivas)
+        run: |
+          dotnet list ApiGatewayPay.sln package --vulnerable --include-transitive | tee vulnerable.txt
+          if grep -q "has the following vulnerable packages" vulnerable.txt; then echo "::error::Dependencias vulnerables"; exit 1; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: TestResults
+
+  dependency-review:
+    name: Revisión de dependencias (PR)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: moderate
+          comment-summary-in-pr: on-failure
+
+  sast:
+    name: SAST (CodeQL)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: csharp
+          build-mode: manual
+          queries: security-extended,security-and-quality
+      - run: dotnet build ApiGatewayPay.sln -c Release
+      - uses: github/codeql-action/analyze@v3
+
+  secrets:
+    name: Detección de secretos (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # historial completo: un secreto borrado sigue comprometido
+      - name: gitleaks
+        run: |
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.21.2 detect --source /repo --config /repo/.gitleaks.toml --redact --verbose
+
+  container:
+    name: Imagen, escaneo (Trivy) y SBOM
+    needs: [ build-test ]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build de la imagen
+        run: docker build -t apigatewaypay:${{ github.sha }} .
+      - name: Trivy (vulnerabilidades y configuración)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: apigatewaypay:${{ github.sha }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+          format: sarif
+          output: trivy.sarif
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy.sarif
+          category: trivy
+      - name: Trivy (Dockerfile e IaC)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+      - name: SBOM (CycloneDX)
+        uses: anchore/sbom-action@v0
+        with:
+          image: apigatewaypay:${{ github.sha }}
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.cdx.json
+
+  # Publicación: solo en main, tras todos los controles. Firme la imagen (cosign) y despliegue por entorno
+  # con aprobación manual (GitHub Environments) para producción.
+  release:
+    name: Publicar imagen firmada
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [ build-test, sast, secrets, container ]
+    runs-on: ubuntu-latest
+    environment: sandbox
+    permissions:
+      contents: read
+      packages: write
+      id-token: write   # firma keyless con OIDC (cosign)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build y push
+        run: |
+          IMAGE=ghcr.io/${{ github.repository }}:${{ github.sha }}
+          docker build -t "${IMAGE,,}" .
+          docker push "${IMAGE,,}"
+      - uses: sigstore/cosign-installer@v3
+      - name: Firmar imagen
+        run: |
+          IMAGE=ghcr.io/${{ github.repository }}:${{ github.sha }}
+          cosign sign --yes "${IMAGE,,}"

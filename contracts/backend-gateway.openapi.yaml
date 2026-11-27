@@ -1,0 +1,113 @@
+openapi: 3.1.0
+info:
+  title: Contrato que debe exponer TU backend para ApiGatewayPay (HttpBackendAdapter)
+  version: 1.0.0
+  description: |
+    ApiGatewayPay llama a estos endpoints (rutas configurables en Backend:Http:Paths).
+    Autenticación: OAuth2 client credentials, API key o mTLS (Backend:Http:Auth / Backend:Http:Http:ClientCertificate).
+    Las notificaciones salientes llevan firma HMAC: verifíquela antes de procesar.
+servers:
+  - url: https://backend.tu-dominio.com
+security:
+  - oauth2: []
+paths:
+  /v1/tenants/{tenantId}/accounts:
+    get:
+      summary: Cuentas operativas del tenant (fuente de verdad de pertenencia, anti-BOLA)
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, pattern: "^[a-z0-9-]{1,64}$" } }
+      responses:
+        "200":
+          description: Lista de cuentas
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 100
+                items: { $ref: "#/components/schemas/BackendAccount" }
+  /v1/payments/authorize:
+    post:
+      summary: Reglas de negocio del backend y selección de cuenta origen (sin efectos secundarios; puede reintentarse)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BackendPaymentRequest" }
+      responses:
+        "200":
+          description: Decisión
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BackendPaymentDecision" }
+  /v1/payments/events:
+    post:
+      summary: Notificación de cambio de estado (entrega al-menos-una-vez; deduplique por Idempotency-Key)
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string }, description: "{paymentId}-{status}" }
+        - { name: X-Signature-Timestamp, in: header, required: true, schema: { type: integer } }
+        - { name: X-Signature-Nonce, in: header, required: true, schema: { type: string } }
+        - name: X-Signature
+          in: header
+          required: true
+          schema: { type: string }
+          description: "v1=hex(HMAC-SHA256(secreto, \"{timestamp}.{nonce}.{cuerpo}\")). Rechace timestamps con más de 5 min de desfase y nonces repetidos."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BackendPaymentEvent" }
+      responses:
+        "200": { description: Recibido }
+        "204": { description: Recibido }
+  /health:
+    get:
+      summary: Salud (usado por /ready de ApiGatewayPay)
+      security: []
+      responses:
+        "200": { description: OK }
+components:
+  securitySchemes:
+    oauth2:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://idp.tu-dominio.com/oauth2/token
+          scopes: {}
+  schemas:
+    BackendAccount:
+      type: object
+      additionalProperties: true
+      required: [ accountRef, bankAccountId, currency, displayName ]
+      properties:
+        accountRef: { type: string, maxLength: 64, description: "Alias opaco expuesto a clientes" }
+        bankAccountId: { type: string, maxLength: 34, description: "Número/ID de la cuenta en el banco (no se expone completo)" }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        displayName: { type: string, maxLength: 140 }
+    BackendPaymentRequest:
+      type: object
+      required: [ paymentId, tenantId, requestedBy, amountMinor, currency, beneficiaryId, reference ]
+      properties:
+        paymentId: { type: string, format: uuid }
+        tenantId: { type: string }
+        requestedBy: { type: string }
+        amountMinor: { type: integer, format: int64, minimum: 1 }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        beneficiaryId: { type: string, format: uuid }
+        reference: { type: string, maxLength: 140 }
+    BackendPaymentDecision:
+      type: object
+      required: [ approved ]
+      properties:
+        approved: { type: boolean }
+        debtorAccountRef: { type: [ string, "null" ], description: "accountRef de la cuenta que fondea el pago (obligatorio si approved=true)" }
+        reasonCode: { type: [ string, "null" ], maxLength: 32 }
+    BackendPaymentEvent:
+      type: object
+      required: [ paymentId, tenantId, status, occurredAt ]
+      properties:
+        paymentId: { type: string, format: uuid }
+        tenantId: { type: string }
+        status: { type: string, enum: [ Confirmed, Failed, Rejected, Reversed ] }
+        bankReference: { type: [ string, "null" ] }
+        failureCode: { type: [ string, "null" ] }
+        occurredAt: { type: string, format: date-time }
